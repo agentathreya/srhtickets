@@ -1,24 +1,91 @@
-# Static HTML/JS project pipeline
-
 trigger:
-- main  # Set the trigger to your main branch
+  branches:
+    include:
+      - main
+    paths:
+      exclude:
+        - README.md
+        - .gitignore
 
-pool:
-  vmImage: 'ubuntu-latest'  # Use an Ubuntu agent
+variables:
+  npm_config_cache: $(Pipeline.Workspace)/.npm
+  CI: true
 
-steps:
-- task: ArchiveFiles@2
-  displayName: 'Archive files'
-  inputs:
-    rootFolderOrFile: '$(Build.SourcesDirectory)'
-    includeRootFolder: false
-    archiveType: 'zip'
-    archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
-    replaceExistingArchive: true
+stages:
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - job: Build_Job
+        displayName: 'Build Application'
+        pool:
+          vmImage: 'ubuntu-latest'
+        
+        steps:
+          # Checkout code
+          - checkout: self
+            clean: true
+            
+          # Setup Node.js
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '18.x'
+              
+          # Cache node_modules for faster builds
+          - task: Cache@2
+            displayName: 'Cache npm dependencies'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | package-lock.json'
+              restoreKeys: |
+                npm | "$(Agent.OS)"
+              path: $(npm_config_cache)
+              
+          # Install dependencies
+          - script: npm ci
+            displayName: 'npm ci'
+            
+          # Build the application
+          - script: npm run build
+            displayName: 'Build production app'
+            
+          # Run tests (if you have them)
+          - script: npm test
+            displayName: 'Run tests'
+            condition: always()
+            
+          # Publish build artifacts
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish build artifacts'
+            inputs:
+              targetPath: 'dist'
+              artifact: 'srhtickets-app'
+              publishLocation: 'pipeline'
 
-- task: PublishBuildArtifacts@1
-  displayName: 'Publish Artifact'
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'drop'
-    publishLocation: 'Container'
+  - stage: Deploy
+    displayName: 'Deploy to Azure Storage'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: Deploy_Job
+        displayName: 'Deploy Static Site'
+        pool:
+          vmImage: 'ubuntu-latest'
+          
+        steps:
+          # Download the artifact
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download build artifacts'
+            inputs:
+              artifact: 'srhtickets-app'
+              path: '$(Pipeline.Workspace)/srhtickets-app'
+              
+          # Deploy to Azure Storage static website
+          - task: AzureFileCopy@4
+            displayName: 'Deploy to Azure Storage'
+            inputs:
+              SourcePath: '$(Pipeline.Workspace)/srhtickets-app'
+              azureSubscription: 'Your-Azure-Service-Connection'
+              Destination: 'AzureBlob'
+              storage: 'yourstorageaccount'
+              ContainerName: '$web'
+              BlobPrefix: 'srhtickets'
