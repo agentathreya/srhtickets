@@ -1,0 +1,29 @@
+trigger:
+- main  # Trigger the pipeline on changes to the main branch
+
+pool:
+  vmImage: 'ubuntu-latest'  # Use a Microsoft-hosted agent
+
+steps:
+- script: |
+    echo "Building the project..."
+    # Add your build commands here
+    npm install
+    npm run build
+  displayName: 'Build step'
+
+- task: ArchiveFiles@2
+  displayName: 'Archive files'
+  inputs:
+    rootFolderOrFile: '$(Build.SourcesDirectory)'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+    replaceExistingArchive: true
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Artifact'
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
